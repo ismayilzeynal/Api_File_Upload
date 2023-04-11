@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using WebApi.Data.DAL;
 using WebApi.Dtos.CategoryDtos;
 using WebApi.Dtos.ProductDtos;
+using WebApi.Extensions;
 using WebApi.Models;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using static System.Net.WebRequestMethods;
 
 namespace WebApi.Controllers
 {
@@ -12,15 +15,17 @@ namespace WebApi.Controllers
     public class CategoryController : ControllerBase
     {
         private readonly AppDbContext _appDbContext;
+        private readonly IWebHostEnvironment _webHostEnvironment;
 
-        public CategoryController(AppDbContext appDbContext)
+        public CategoryController(AppDbContext appDbContext, IWebHostEnvironment webHostEnvironment)
         {
             _appDbContext = appDbContext;
+            _webHostEnvironment = webHostEnvironment;
         }
 
 
         [HttpGet]
-        public IActionResult GetAll(string search, int page = 1) // category uzre pagination lazim olsa rahat istifade ede bilecek
+        public IActionResult GetAll(string search, int page = 1)
         {
             var query = _appDbContext.Categories
                 .Where(c => !c.IsDelete);
@@ -38,12 +43,17 @@ namespace WebApi.Controllers
             categoryListDto.Items = categories.Select(c => new CategoryListItemDto
             {
                 Name = c.Name,
+                Desc = c.Desc,
+                ImageUrl = "https://localhost:7197/img/" + c.ImageUrl,
                 CreatedDate = c.CreatedDate,
                 UpdatedDate = c.UpdatedDate
             }).ToList();
 
             return StatusCode(200, categoryListDto);
         }
+
+
+
 
         [HttpGet("{id}")]
         public IActionResult GetOne(int id)
@@ -56,6 +66,8 @@ namespace WebApi.Controllers
             CategoryReturnDto categoryReturnDto = new()
             {
                 Name = category.Name,
+                Desc = category.Desc,
+                ImageUrl = "https://localhost:7197/img/" + category.ImageUrl,
                 UpdatedDate = category.UpdatedDate,
                 CreatedDate = category.CreatedDate
             };
@@ -65,11 +77,18 @@ namespace WebApi.Controllers
 
 
         [HttpPost]
-        public IActionResult AddCategory(CategoryCreateDto categoryCreateDto)
+        public IActionResult AddCategory([FromForm] CategoryCreateDto categoryCreateDto)
         {
+            if (categoryCreateDto.Photo == null) return StatusCode(409);
+            if (!categoryCreateDto.Photo.IsImage()) return BadRequest("photo type deyil");
+            if (!categoryCreateDto.Photo.CheckSize(1)) return BadRequest("size duzgun deyil");
+
+
             Category newCategory = new()
             {
                 Name = categoryCreateDto.Name,
+                Desc = categoryCreateDto.Desc,
+                ImageUrl = categoryCreateDto.Photo.SaveImage(_webHostEnvironment, "img", categoryCreateDto.Photo.FileName),
                 IsDelete = categoryCreateDto.IsDelete,
                 CreatedDate = DateTime.UtcNow,
                 UpdatedDate = DateTime.UtcNow
@@ -93,10 +112,21 @@ namespace WebApi.Controllers
         [HttpPut("{id}")]
         public IActionResult UpdateCategory(int id, CategoryUpdateDto categoryUpdateDto)
         {
+            if (id == null) return NotFound();      
             var existCatgeory = _appDbContext.Categories.FirstOrDefault(c => c.Id == id);
             if (existCatgeory == null) return NotFound();
+            bool result = _appDbContext.Categories.Any(c => c.Name.ToLower() == categoryUpdateDto.Name.ToLower() && c.Id != id);
+            if (result) return StatusCode(409);
+
+            if (categoryUpdateDto.Photo == null) return StatusCode(409);
+            if (!categoryUpdateDto.Photo.IsImage()) return BadRequest("photo type deyil");
+            if (!categoryUpdateDto.Photo.CheckSize(1)) return BadRequest("size duzgun deyil");
+
 
             existCatgeory.Name = categoryUpdateDto.Name;
+            existCatgeory.Desc = categoryUpdateDto.Desc;
+            // img deyisikliyi ucun elave mentiq yazmaq lazimdi
+            // existCatgeory.ImageUrl = categoryUpdateDto.Photo.SaveImage(_webHostEnvironment, "img", categoryUpdateDto.Photo.FileName);
             existCatgeory.IsDelete = categoryUpdateDto.IsDelete;
             _appDbContext.SaveChanges();
 
